@@ -3,6 +3,7 @@ import board
 import digitalio
 import threading
 import typing
+import time
 
 class Numpad:
     def __init__(self):
@@ -29,6 +30,7 @@ class Numpad:
 
     def check(self):
         while True:
+            time.sleep(0.2)
             pressed = self.keypad.pressed_keys
     
             if pressed and not pressed == self.old_pressed:
