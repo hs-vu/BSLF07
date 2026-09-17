@@ -9,6 +9,7 @@ class Numpad:
         rows = []
         coloumns = []
         self.events:dict[int,list[callable]] = {}
+        self.wildcard:callable
 
         for x in range(0,10,1):
             self.events[x] = []
@@ -35,11 +36,18 @@ class Numpad:
                 if type(pressed[0]) == type(0):
                     for func in self.events[pressed[0]]:
                         func()
+                    try:
+                        self.wildcard(pressed[0])
+                    except Exception:
+                        pass
             if not pressed:
                 self.old_pressed = [10]
 
     def register(self, func:callable, num:int):
         self.events[num].append(func)
+
+    def registerWildcard(self, func:callable):
+        self.wildcard = func
 
 if __name__ == "__main__":
     numpad = Numpad()
