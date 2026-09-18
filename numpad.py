@@ -26,7 +26,8 @@ class Numpad:
         self.keypad = adafruit_matrixkeypad.Matrix_Keypad(rows, coloumns, keys)
         self.old_pressed = [10]
 
-        threading.Thread(target=self.check).start()
+        self.thread = threading.Thread(target=self.check)
+        self.thread.start()
 
     def check(self):
         while True:
@@ -50,6 +51,9 @@ class Numpad:
 
     def registerWildcard(self, func:callable):
         self.wildcard = func
+
+    def stop(self):
+        self.thread.join(timeout=1)
 
 if __name__ == "__main__":
     numpad = Numpad()
