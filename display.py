@@ -301,3 +301,156 @@ class SevenSegmentDisplay:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+class SingleDigitDisplay:
+    """
+    Ansteuerung einer einzelnen 7-Segment-Ziffer direkt über GPIO.
+    Kein Multiplexing nötig, da nur eine Ziffer - die Segmente werden
+    einmal gesetzt und bleiben statisch an, bis sich der Wert ändert.
+    """
+ 
+    # Segment-Reihenfolge: a, b, c, d, e, f, g, dp
+    DIGIT_PATTERNS = {
+        0: (1, 1, 1, 1, 1, 1, 0, 0),
+        1: (0, 1, 1, 0, 0, 0, 0, 0),
+        2: (1, 1, 0, 1, 1, 0, 1, 0),
+        3: (1, 1, 1, 1, 0, 0, 1, 0),
+        4: (0, 1, 1, 0, 0, 1, 1, 0),
+        5: (1, 0, 1, 1, 0, 1, 1, 0),
+        6: (1, 0, 1, 1, 1, 1, 1, 0),
+        7: (1, 1, 1, 0, 0, 0, 0, 0),
+        8: (1, 1, 1, 1, 1, 1, 1, 0),
+        9: (1, 1, 1, 1, 0, 1, 1, 0),
+        None: (0, 0, 0, 0, 0, 0, 0, 0),  # aus/leer
+    }
+ 
+    def __init__(self, segment_pins, chip=0, debug: bool = False,
+                 segment_active_high: bool = True):
+        """
+        segment_pins: Liste [a, b, c, d, e, f, g, dp] als GPIO-Nummern (BCM)
+        debug:        True = keine echten GPIO-Schreibvorgänge, stattdessen
+                       Ausgabe ins Terminal.
+        segment_active_high: True (Standard) = Segment-Pin auf 1 schaltet das
+                       Segment an. False, falls dein Display umgekehrt gepolt ist
+                       (z.B. bei Common Cathode mit invertierter Logik).
+        """
+        if len(segment_pins) != 8:
+            raise ValueError("segment_pins braucht genau 8 Einträge (a-g, dp)")
+ 
+        self.segment_pins = segment_pins
+        self.segment_active_high = segment_active_high
+        self.debug = debug or not LGPIO_AVAILABLE
+ 
+        self._handle = None
+        self._value: Optional[int] = None
+        self._dot = False
+        self._lock = threading.Lock()
+ 
+        self._blinking = False
+        self._blink_visible = True
+        self._blink_thread: Optional[threading.Thread] = None
+ 
+        if self.debug:
+            reason = "explizit angefordert" if debug else "lgpio nicht verfügbar"
+            print(f"[SingleDigitDisplay] Debug-Modus aktiv ({reason}) - keine echte GPIO-Ausgabe")
+        else:
+            self._handle = lgpio.gpiochip_open(chip)
+            off_level = 0 if self.segment_active_high else 1
+            for pin in self.segment_pins:
+                lgpio.gpio_claim_output(self._handle, pin, off_level)
+ 
+        # Sicherstellen, dass close() auch bei Strg+C / SIGTERM / normalem
+        # Programmende aufgerufen wird, damit keine Ziffer statisch anbleibt.
+        atexit.register(self.close)
+        try:
+            signal.signal(signal.SIGTERM, self._handle_signal)
+            signal.signal(signal.SIGINT, self._handle_signal)
+        except ValueError:
+            pass
+ 
+    def _handle_signal(self, signum, frame):
+        self.close()
+        signal.signal(signum, signal.SIG_DFL)
+        signal.raise_signal(signum)
+ 
+    # ---------- Öffentliche API ----------
+ 
+    def set_digit(self, value: Optional[int]):
+        """value: 0-9 oder None für leer/aus."""
+        if value is not None and not (0 <= value <= 9):
+            raise ValueError("value muss 0-9 oder None sein")
+        with self._lock:
+            self._value = value
+        self._render()
+ 
+    def set_dot(self, on: bool):
+        with self._lock:
+            self._dot = on
+        self._render()
+ 
+    def clear(self):
+        self.set_digit(None)
+ 
+    def blink(self, interval: float = 0.5):
+        """Lässt die aktuell angezeigte Ziffer im festen Abstand blinken,
+        bis end_blink() aufgerufen wird."""
+        if self._blinking:
+            return
+        self._blinking = True
+        self._blink_thread = threading.Thread(
+            target=self._blink_loop, args=(interval,), daemon=True
+        )
+        self._blink_thread.start()
+ 
+    def end_blink(self):
+        self._blinking = False
+        if self._blink_thread:
+            self._blink_thread.join(timeout=1)
+            self._blink_thread = None
+        self._blink_visible = True
+        self._render()
+ 
+    def close(self):
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        self._blinking = False
+        if self._blink_thread:
+            self._blink_thread.join(timeout=1)
+        if not self.debug and self._handle is not None:
+            off_level = 0 if self.segment_active_high else 1
+            for pin in self.segment_pins:
+                lgpio.gpio_write(self._handle, pin, off_level)
+            lgpio.gpiochip_close(self._handle)
+ 
+    # ---------- Intern ----------
+ 
+    def _blink_loop(self, interval: float):
+        while self._blinking:
+            time.sleep(interval)
+            self._blink_visible = not self._blink_visible
+            self._render()
+ 
+    def _render(self):
+        with self._lock:
+            value = self._value if self._blink_visible else None
+            dot = self._dot if self._blink_visible else False
+ 
+        pattern = list(self.DIGIT_PATTERNS[value])
+        if dot:
+            pattern[7] = 1
+ 
+        if self.debug:
+            print(f"[DEBUG] value={value} dot={dot} pattern={pattern}")
+            return
+ 
+        for pin, bit in zip(self.segment_pins, pattern):
+            level = bit if self.segment_active_high else (1 - bit)
+            lgpio.gpio_write(self._handle, pin, level)
+ 
+    # Context-Manager-Support (with-Statement)
+    def __enter__(self):
+        return self
+ 
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()

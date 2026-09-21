@@ -7,7 +7,10 @@ import time
 
 pad = numpad.Numpad()
 screen = display.SevenSegmentDisplay([2,3,4,17,27,22,0,5], [6,13,19,26],digit_active_high=True)
+screen.start()
 led = LEDs.ledcontroller(port="/dev/ttyACM0", baudrate=9600)
+singlescreen = display.SingleDigitDisplay([1,12,25,18,20,21,23,24])
+singlescreen.set_digit(8)
 time.sleep(2)
 
 print("Programm gestartet und pad verbunden :)")
@@ -25,7 +28,8 @@ def updateScreen():
         i+=1
 
 updateScreen()
-screen.start()
+
+
 
 for x in range (0,4,1):
     led.enableGreenLED(x)
@@ -57,6 +61,7 @@ def wildcard(x):
             time.sleep(1)
             screen.end_blink()
         tries -= 1
+        singlescreen.set_digit(tries)
         print(f"Noch {tries} Versuche")
         code_index = 0
 
