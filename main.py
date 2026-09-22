@@ -24,7 +24,8 @@ IDLE_CHANGE_INTERVAL = 1.5   # Sekunden zwischen Zahlenwechseln im Idle-Modus
 WRONG_GUESS_HOLD_TIME = 3    # wie lange Blinken + LED-Feedback bei Falscheingabe angezeigt wird
 CORRECT_GUESS_HOLD_TIME = 1.5
 
-idle_event = threading.Event()   # gesetzt = Idle-Modus AKTIV
+idle_active = False              # einfaches Flag: läuft der Idle-Modus gerade?
+idle_stop_event = threading.Event()   # NUR zum sofortigen Aufwecken beim Beenden
 idle_thread: threading.Thread | None = None
 
 
@@ -60,26 +61,30 @@ def start_new_round():
 
 
 def idle_loop():
-    """Läuft im Hintergrund, solange idle_event gesetzt ist - lässt die
+    """Läuft im Hintergrund, solange idle_active True ist - lässt die
     4-stellige Anzeige langsam zufällige Ziffern durchwechseln."""
-    while idle_event.is_set():
+    while idle_active:
         for i in range(4):
             screen.set_digit(i, random.randint(0, 9))
-        # event.wait() statt time.sleep() - reagiert sofort, sobald
-        # exit_idle_and_restart() den Event löscht, statt bis zum Ende
-        # des Intervalls zu blockieren
-        idle_event.wait(timeout=IDLE_CHANGE_INTERVAL)
+        # idle_stop_event.wait() statt time.sleep() - wartet die volle
+        # IDLE_CHANGE_INTERVAL Zeit ab, kehrt aber SOFORT zurück, falls
+        # exit_idle_and_restart() währenddessen das Stop-Signal setzt
+        # (gibt True zurück, wenn wegen des Signals geweckt, sonst False
+        # nach Ablauf des Timeouts - beides führt hier einfach zur
+        # nächsten Prüfung von idle_active oben in der while-Bedingung)
+        idle_stop_event.wait(timeout=IDLE_CHANGE_INTERVAL)
 
 
 def enter_idle():
     """Startet den Idle-Screensaver (langsam zufällig wechselnde Zahlen)."""
-    global idle_thread
-    if idle_event.is_set():
+    global idle_active, idle_thread
+    if idle_active:
         return
     print("Idle-Modus gestartet")
     led.disableAllLED()
     singlescreen.stop()
-    idle_event.set()
+    idle_active = True
+    idle_stop_event.clear()
     idle_thread = threading.Thread(target=idle_loop, daemon=True)
     idle_thread.start()
 
@@ -87,10 +92,11 @@ def enter_idle():
 def exit_idle_and_restart():
     """Wird durch einen Tastendruck während des Idle-Modus ausgelöst:
     Screensaver stoppen, kurz alles aus, LED-Test, neue Runde starten."""
-    global idle_thread
+    global idle_active, idle_thread
     print("Aufgewacht - starte neue Runde")
 
-    idle_event.clear()
+    idle_active = False
+    idle_stop_event.set()   # weckt idle_loop() sofort aus dem Warten auf
     if idle_thread:
         idle_thread.join(timeout=1)
         idle_thread = None
@@ -114,7 +120,7 @@ def wildcard(x):
 
     # Falls gerade Idle-Modus läuft: dieser Tastendruck weckt nur auf,
     # zählt NICHT als Ratewert
-    if idle_event.is_set():
+    if idle_active:
         exit_idle_and_restart()
         return
 
@@ -174,7 +180,8 @@ try:
 except KeyboardInterrupt:
     print("Beende Programm...")
 finally:
-    idle_event.clear()
+    idle_active = False
+    idle_stop_event.set()
     if idle_thread:
         idle_thread.join(timeout=1)
     pad.stop()
