@@ -1,6 +1,7 @@
 import numpad
 import display
 import LEDs
+import MQTT
 import random
 import threading
 import time
@@ -9,6 +10,7 @@ pad = numpad.Numpad()
 screen = display.SevenSegmentDisplay([2, 3, 4, 17, 27, 22, 0, 5], [6, 13, 19, 26], digit_active_high=True)
 screen.start()
 led = LEDs.ledcontroller(port="/dev/ttyACM0", baudrate=9600)
+mqtt = MQTT.MqttReporter("192.168.188.90")
 singlescreen = display.SingleDigitDisplay([1, 12, 25, 18, 20, 21, 23, 24])
 singlescreen.set_digit(8)
 time.sleep(2)
@@ -52,6 +54,7 @@ def start_new_round():
     """Generiert einen neuen Code, setzt Rateversuch + Anzeige zurück."""
     global code, guessed_code, code_index, tries
     code = [random.randint(0, 9) for _ in range(4)]
+    mqtt.report_answer(code)
     guessed_code = [0, 0, 0, 0]
     code_index = 0
     tries = 4
