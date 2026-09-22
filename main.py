@@ -20,6 +20,10 @@ guessed_code: list[int] = [0, 0, 0, 0]
 code_index: int = 0
 tries: int = 4
 
+IDLE_CHANGE_INTERVAL = 1.5   # Sekunden zwischen Zahlenwechseln im Idle-Modus
+WRONG_GUESS_HOLD_TIME = 3    # wie lange Blinken + LED-Feedback bei Falscheingabe angezeigt wird
+CORRECT_GUESS_HOLD_TIME = 1.5
+
 idle_event = threading.Event()   # gesetzt = Idle-Modus AKTIV
 idle_thread: threading.Thread | None = None
 
@@ -61,13 +65,14 @@ def idle_loop():
     while idle_event.is_set():
         for i in range(4):
             screen.set_digit(i, random.randint(0, 9))
-        # event.wait() statt time.sleep() - reagiert sofort auf enter_idle()-Stop,
-        # statt bis zu 'interval' Sekunden zu blockieren
-        idle_event.wait(timeout=0.6)
+        # event.wait() statt time.sleep() - reagiert sofort, sobald
+        # exit_idle_and_restart() den Event löscht, statt bis zum Ende
+        # des Intervalls zu blockieren
+        idle_event.wait(timeout=IDLE_CHANGE_INTERVAL)
 
 
 def enter_idle():
-    """Startet den Idle-Screensaver (zufällig wechselnde Zahlen)."""
+    """Startet den Idle-Screensaver (langsam zufällig wechselnde Zahlen)."""
     global idle_thread
     if idle_event.is_set():
         return
@@ -121,18 +126,27 @@ def wildcard(x):
     if code_index > 3:
         print(guessed_code)
         if guessed_code == code:
-            # Richtig geraten - kurz feiern, dann in den Idle-Modus
+            # Richtig geraten - alle LEDs grün als Bestätigung, kurz feiern,
+            # dann in den Idle-Modus
+            for i in range(4):
+                led.enableGreenLED(i)
             screen.blink(0.1)
-            time.sleep(1)
+            time.sleep(CORRECT_GUESS_HOLD_TIME)
             screen.end_blink()
+            led.disableAllLED()
             print("Code geknackt! Gehe in Idle-Modus.")
             enter_idle()
             return
 
-        # Falsch geraten
+        # Falsch geraten - Wordle-Style-Feedback auf den LEDs anzeigen
+        result = led.show_feedback(guessed_code, code)
+        print(f"Feedback: {result}")
+
         screen.blink(0.5)
-        time.sleep(3)
+        time.sleep(WRONG_GUESS_HOLD_TIME)
         screen.end_blink()
+        led.disableAllLED()
+
         guessed_code = [0, 0, 0, 0]
         updateScreen()
 

@@ -1,4 +1,5 @@
 import serial
+from collections import Counter
 
 
 class ledcontroller:
@@ -26,6 +27,54 @@ class ledcontroller:
     def disableAllLED(self):
         self.ledstate = 0
         self.__send_byte(self.ledstate)
+
+    def show_feedback(self, guess: list, secret: list):
+        """
+        Wordle-Style-Auswertung: pro Stelle wird die passende LED gesetzt.
+        - grün  = richtige Ziffer an richtiger Stelle
+        - gelb  = Ziffer kommt im Code vor, aber an anderer Stelle
+        - aus   = Ziffer kommt im Code gar nicht (mehr) vor
+
+        Behandelt doppelte Ziffern korrekt (wie beim echten Wordle):
+        z.B. secret=[1,1,2,3], guess=[1,4,1,1]
+        -> Stelle 0: grün (1 an richtiger Stelle)
+        -> Stelle 2: gelb (1 kommt noch vor, an anderer Stelle) - aber nur
+           EINMAL gelb, da die zweite '1' im Code schon durch die grüne
+           Stelle 0 "verbraucht" ist
+        -> Stelle 3: aus (keine 1 mehr übrig zum Zuordnen)
+        """
+        if len(guess) != 4 or len(secret) != 4:
+            raise ValueError("guess und secret müssen je 4 Elemente haben")
+
+        result = [None] * 4
+        remaining = Counter(secret)
+
+        # 1. Durchgang: exakte Treffer (grün) zuerst, damit die richtige
+        #    Anzahl an "verbrauchten" Ziffern für den Gelb-Durchgang übrig bleibt
+        for i in range(4):
+            if guess[i] == secret[i]:
+                result[i] = "green"
+                remaining[guess[i]] -= 1
+
+        # 2. Durchgang: vorhandene, aber falsch platzierte Ziffern (gelb)
+        for i in range(4):
+            if result[i] is None:
+                if remaining[guess[i]] > 0:
+                    result[i] = "yellow"
+                    remaining[guess[i]] -= 1
+                else:
+                    result[i] = "off"
+
+        new_state = 0
+        for i, r in enumerate(result):
+            if r == "green":
+                new_state |= (1 << self._green_bits[i])
+            elif r == "yellow":
+                new_state |= (1 << self._yellow_bits[i])
+
+        self.ledstate = new_state
+        self.__send_byte(self.ledstate)
+        return result
 
     def _set_bit(self, bit_index):
         self.ledstate = self.ledstate | (1 << bit_index)
