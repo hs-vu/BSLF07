@@ -20,9 +20,10 @@ guessed_code: list[int] = [0, 0, 0, 0]
 code_index: int = 0
 tries: int = 4
 
-IDLE_CHANGE_INTERVAL = 1.5   # Sekunden zwischen Zahlenwechseln im Idle-Modus
+IDLE_CHANGE_INTERVAL = .5   # Sekunden zwischen Zahlenwechseln im Idle-Modus
 WRONG_GUESS_HOLD_TIME = 3    # wie lange Blinken + LED-Feedback bei Falscheingabe angezeigt wird
-CORRECT_GUESS_HOLD_TIME = 1.5
+CORRECT_GUESS_BLINK_TIME = 1.5
+CORRECT_CODE_DISPLAY_HOLD = 2  # wie lange der richtige Code danach ruhig stehen bleibt
 
 idle_active = False              # einfaches Flag: läuft der Idle-Modus gerade?
 idle_stop_event = threading.Event()   # NUR zum sofortigen Aufwecken beim Beenden
@@ -132,14 +133,19 @@ def wildcard(x):
     if code_index > 3:
         print(guessed_code)
         if guessed_code == code:
-            # Richtig geraten - alle LEDs grün als Bestätigung, kurz feiern,
-            # dann in den Idle-Modus
+            # Richtig geraten - alle LEDs grün als Bestätigung, kurz feiern
             for i in range(4):
                 led.enableGreenLED(i)
             screen.blink(0.1)
-            time.sleep(CORRECT_GUESS_HOLD_TIME)
+            time.sleep(CORRECT_GUESS_BLINK_TIME)
             screen.end_blink()
             led.disableAllLED()
+
+            # Den richtigen Code jetzt noch kurz RUHIG (ohne Blinken) stehen
+            # lassen, bevor der Screensaver übernimmt
+            updateScreen()
+            time.sleep(CORRECT_CODE_DISPLAY_HOLD)
+
             print("Code geknackt! Gehe in Idle-Modus.")
             enter_idle()
             return
