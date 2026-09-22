@@ -1,42 +1,4 @@
 import serial
-import time
-
-# Port anpassen - herausfinden mit: ls /dev/tty*  (vor/nach Anschließen vergleichen)
-# meist /dev/ttyACM0 oder /dev/ttyUSB0 bei einem Uno R3
-PORT = "/dev/ttyACM0"
-BAUDRATE = 9600
-
-ser = serial.Serial(PORT, BAUDRATE, timeout=1)
-time.sleep(2)  # Arduino resettet sich beim Verbindungsaufbau - kurz warten,
-               # bis der Bootloader durch ist und setup() gelaufen ist
-
-
-def send_byte(byte_val: int):
-    if not (0 <= byte_val <= 255):
-        raise ValueError("byte_val muss zwischen 0 und 255 liegen")
-    ser.write(bytes([byte_val]))
-
-
-if __name__ == "__main__":
-    # Beispiel: LEDs 0, 2, 4, 6 an (Bitmuster 10101010 = 0xAA)
-    send_byte(0b10101010)
-    time.sleep(2)
-
-    # Alle LEDs an
-    send_byte(0b01010101)
-    time.sleep(2)
-
-    # Alle aus
-    send_byte(0b00000000)
-    time.sleep(0.5)
-
-    # Antwort vom Arduino auslesen (die Debug-Ausgabe aus dem Sketch)
-    while ser.in_waiting:
-        print(ser.readline().decode(errors="replace").strip())
-
-ser.close()
-
-import serial
 
 
 class ledcontroller:

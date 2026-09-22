@@ -391,6 +391,20 @@ class SingleDigitDisplay:
     def clear(self):
         self.set_digit(None)
  
+    def stop(self):
+        """Schaltet die Anzeige aus (alle Segmente aus, Blinken wird beendet),
+        ohne den GPIO-Handle zu schließen - das Display kann danach mit
+        set_digit() sofort wieder genutzt werden."""
+        self._blinking = False
+        if self._blink_thread:
+            self._blink_thread.join(timeout=1)
+            self._blink_thread = None
+        self._blink_visible = True
+        with self._lock:
+            self._value = None
+            self._dot = False
+        self._render()
+ 
     def blink(self, interval: float = 0.5):
         """Lässt die aktuell angezeigte Ziffer im festen Abstand blinken,
         bis end_blink() aufgerufen wird."""
@@ -414,13 +428,8 @@ class SingleDigitDisplay:
         if getattr(self, "_closed", False):
             return
         self._closed = True
-        self._blinking = False
-        if self._blink_thread:
-            self._blink_thread.join(timeout=1)
+        self.stop()
         if not self.debug and self._handle is not None:
-            off_level = 0 if self.segment_active_high else 1
-            for pin in self.segment_pins:
-                lgpio.gpio_write(self._handle, pin, off_level)
             lgpio.gpiochip_close(self._handle)
  
     # ---------- Intern ----------
