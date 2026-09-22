@@ -28,7 +28,7 @@ def updateScreen():
         i+=1
 
 updateScreen()
-
+singlescreen.set_digit(tries)
 
 
 for x in range (0,4,1):

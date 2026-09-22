@@ -1,0 +1,4 @@
+adafruit-circuitpython-matrixkeypad
+adafruit-blinka
+pyserial
+paho-mqtt
