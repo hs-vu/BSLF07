@@ -17,7 +17,6 @@ time.sleep(2)
 
 print("Programm gestartet und pad verbunden :)")
 
-# ---------------- Einstellungen ----------------
 IDLE_CHANGE_INTERVAL = .5         # 4-stellige Anzeige: Sekunden zwischen Zahlenwechseln
 IDLE_SINGLE_INTERVAL = 2.0        # Einzelziffer: Sekunden zwischen Zahlenwechseln
 IDLE_LED_INTERVAL = 0.4           # LEDs: Sekunden zwischen zufälligem An/Aus
@@ -28,7 +27,6 @@ SOLUTION_DISPLAY_TIME = 3         # Lösung anzeigen, wenn alle Versuche aufgebr
 IDLE_TIMEOUT = 30                 # Sekunden ohne Tastendruck, bis Idle startet
 FEEDBACK_SHOW_TIME = 1.5          # gewählte Bewertung kurz anzeigen
 
-# ---------------- Zustände ----------------
 STATE_PLAYING = "playing"
 STATE_FEEDBACK = "feedback"
 STATE_IDLE = "idle"
@@ -83,7 +81,6 @@ def try_transition(expected, new_state) -> bool:
     return True
 
 
-# ---------------- Anzeige-Helfer ----------------
 
 def show_on_screen(digits):
     for i, number in enumerate(digits):
@@ -124,7 +121,6 @@ def run_startup_tests():
     time.sleep(0.3)
 
 
-# ---------------- Spielrunde ----------------
 
 def start_new_round():
     global code, guessed_code, code_index, tries
@@ -170,7 +166,7 @@ def handle_guess_digit(x):
         enter_feedback()
         return
 
-    # Falsch geraten - Wordle-Style-Feedback
+    # Falsch geraten. Wordle-Style-Feedback
     result = led.show_feedback(guessed_code, code)
     print(f"Feedback: {result}")
 
@@ -196,7 +192,6 @@ def handle_guess_digit(x):
     set_state(STATE_PLAYING)
 
 
-# ---------------- Feedback (1-5) ----------------
 
 def enter_feedback():
     """Nach richtigem Code: Bewertung 1-5 per Numpad abfragen.
@@ -223,7 +218,6 @@ def handle_feedback(rating: int):
     enter_idle()
 
 
-# ---------------- Inaktivität ----------------
 
 def reset_inactivity():
     global last_input_time
@@ -245,7 +239,6 @@ def inactivity_watchdog():
             enter_idle()
 
 
-# ---------------- Idle-Modus ----------------
 
 def idle_loop():
     """Animiert alle drei Anzeigen unabhängig voneinander, jeweils mit
@@ -316,7 +309,6 @@ def wake_up():
     start_new_round()
 
 
-# ---------------- Numpad-Eingang ----------------
 
 def wildcard(x):
     reset_inactivity()
@@ -342,7 +334,6 @@ def wildcard(x):
 pad.registerWildcard(wildcard)
 threading.Thread(target=inactivity_watchdog, daemon=True).start()
 
-# ---------------- Start ----------------
 run_startup_tests()
 start_new_round()
 

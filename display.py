@@ -4,34 +4,13 @@ import threading
 import time
 from typing import Optional, List
 
-try:
-    import lgpio
-    LGPIO_AVAILABLE = True
-except (ImportError, ModuleNotFoundError):
-    LGPIO_AVAILABLE = False
-
-try:
-    import pigpio
-    PIGPIO_AVAILABLE = True
-except (ImportError, ModuleNotFoundError):
-    PIGPIO_AVAILABLE = False
+import lgpio
 
 
 class SevenSegmentDisplay:
     """
     Ansteuerung eines rohen (treiberlosen) 4-Digit-7-Segment-Displays per
-    Software-Multiplexing.
-
-    backend:
-      "lgpio"  - Standard, nutzt das lgpio-Kernelmodul direkt. Funktioniert
-                 immer, aber jeder gpio_write()-Aufruf hat Syscall-Overhead -
-                 bei 12+ Schreibvorgängen pro Refresh-Zyklus kann das auf
-                 langsameren Systemen/unter Last zu Jitter/Flackern führen.
-      "pigpio" - Nutzt den pigpio-Daemon. Braucht `sudo pigpiod` laufend im
-                 Hintergrund (siehe unten). Schreibvorgänge laufen über einen
-                 Sockel zum Daemon, der die Pins mit Hardware-Timing bedient -
-                 spürbar ruhigeres Bild, da weniger Jitter durch den
-                 Python-/Linux-Scheduler.
+    Software-Multiplexing über lgpio.
 
     Optimierung ggü. der ersten Version: pro Refresh-Zyklus wird nur noch der
     VORHER aktive Digit-Pin ausgeschaltet statt aller vier - spart 3 von 4
@@ -55,7 +34,7 @@ class SevenSegmentDisplay:
 
     def __init__(self, segment_pins, digit_pins, chip=0, refresh_delay=0.003,
                  debug: bool = False, digit_active_high: bool = True,
-                 segment_active_high: bool = True, backend: str = "lgpio"):
+                 segment_active_high: bool = True):
         """
         segment_pins: Liste [a, b, c, d, e, f, g, dp] als GPIO-Nummern (BCM)
         digit_pins:   Liste [digit1, digit2, digit3, digit4] als GPIO-Nummern
@@ -65,59 +44,33 @@ class SevenSegmentDisplay:
                        False = Digit-Pin muss auf 0 gezogen werden (Common Cathode).
         segment_active_high: True (Standard) = Segment-Pin auf 1 schaltet das
                        Segment an.
-        backend:      "lgpio" (Standard) oder "pigpio" (braucht laufenden
-                       pigpiod-Daemon, dafür ruhigeres Timing).
         """
         if len(segment_pins) != 8:
             raise ValueError("segment_pins braucht genau 8 Einträge (a-g, dp)")
         if len(digit_pins) != 4:
             raise ValueError("digit_pins braucht genau 4 Einträge")
-        if backend not in ("lgpio", "pigpio"):
-            raise ValueError('backend muss "lgpio" oder "pigpio" sein')
 
         self.segment_pins = segment_pins
         self.digit_pins = digit_pins
         self.refresh_delay = refresh_delay
         self.digit_active_high = digit_active_high
         self.segment_active_high = segment_active_high
-        self.backend = backend
 
-        # Debug wird erzwungen, wenn explizit angefordert ODER wenn das
-        # gewählte Backend gar nicht verfügbar ist (z.B. beim Testen auf dem Mac)
-        backend_available = LGPIO_AVAILABLE if backend == "lgpio" else PIGPIO_AVAILABLE
-        self.debug = debug or not backend_available
+        self.debug = debug
 
         self._handle = None   # lgpio chip handle
-        self._pi = None       # pigpio.pi() Instanz
 
         segment_off_level = 0 if self.segment_active_high else 1
         digit_off_level = 1 if self.digit_active_high else 0
 
         if self.debug:
-            if debug:
-                reason = "explizit angefordert"
-            else:
-                reason = f"Backend '{backend}' nicht verfügbar"
-            print(f"[SevenSegmentDisplay] Debug-Modus aktiv ({reason}) - keine echte GPIO-Ausgabe")
-        elif backend == "lgpio":
+            print("[SevenSegmentDisplay] Debug-Modus aktiv - keine echte GPIO-Ausgabe")
+        else:
             self._handle = lgpio.gpiochip_open(chip)
             for pin in self.segment_pins:
                 lgpio.gpio_claim_output(self._handle, pin, segment_off_level)
             for pin in self.digit_pins:
                 lgpio.gpio_claim_output(self._handle, pin, digit_off_level)
-        else:  # pigpio
-            self._pi = pigpio.pi()
-            if not self._pi.connected:
-                raise RuntimeError(
-                    "Konnte nicht mit pigpiod verbinden. Läuft der Daemon? "
-                    "Starten mit: sudo systemctl start pigpiod  (oder: sudo pigpiod)"
-                )
-            for pin in self.segment_pins:
-                self._pi.set_mode(pin, pigpio.OUTPUT)
-                self._pi.write(pin, segment_off_level)
-            for pin in self.digit_pins:
-                self._pi.set_mode(pin, pigpio.OUTPUT)
-                self._pi.write(pin, digit_off_level)
 
         self._digits: List[Optional[int]] = [None, None, None, None]
         self._dots: List[bool] = [False, False, False, False]
@@ -146,7 +99,6 @@ class SevenSegmentDisplay:
         signal.signal(signum, signal.SIG_DFL)
         signal.raise_signal(signum)
 
-    # ---------- Öffentliche API ----------
 
     def set_digit(self, position: int, value: Optional[int]):
         """value: 0-9 oder None für leer. position: 0-3"""
@@ -231,21 +183,13 @@ class SevenSegmentDisplay:
             return
         self._closed = True
         self.stop()
-        if not self.debug:
-            if self.backend == "lgpio" and self._handle is not None:
-                lgpio.gpiochip_close(self._handle)
-            elif self.backend == "pigpio" and self._pi is not None:
-                self._pi.stop()
+        if not self.debug and self._handle is not None:
+            lgpio.gpiochip_close(self._handle)
 
-    # ---------- Intern: GPIO-Zugriff, backend-unabhängig ----------
 
     def _write(self, pin: int, level: int):
-        if self.backend == "lgpio":
-            lgpio.gpio_write(self._handle, pin, level)
-        else:
-            self._pi.write(pin, level)
+        lgpio.gpio_write(self._handle, pin, level)
 
-    # ---------- Intern: Multiplexing ----------
 
     def _refresh_loop(self):
         while self._running:
@@ -339,7 +283,7 @@ class SingleDigitDisplay:
  
         self.segment_pins = segment_pins
         self.segment_active_high = segment_active_high
-        self.debug = debug or not LGPIO_AVAILABLE
+        self.debug = debug
  
         self._handle = None
         self._value: Optional[int] = None
@@ -351,8 +295,7 @@ class SingleDigitDisplay:
         self._blink_thread: Optional[threading.Thread] = None
  
         if self.debug:
-            reason = "explizit angefordert" if debug else "lgpio nicht verfügbar"
-            print(f"[SingleDigitDisplay] Debug-Modus aktiv ({reason}) - keine echte GPIO-Ausgabe")
+            print("[SingleDigitDisplay] Debug-Modus aktiv - keine echte GPIO-Ausgabe")
         else:
             self._handle = lgpio.gpiochip_open(chip)
             off_level = 0 if self.segment_active_high else 1
@@ -372,8 +315,7 @@ class SingleDigitDisplay:
         self.close()
         signal.signal(signum, signal.SIG_DFL)
         signal.raise_signal(signum)
- 
-    # ---------- Öffentliche API ----------
+
  
     def set_digit(self, value: Optional[int]):
         """value: 0-9 oder None für leer/aus."""
@@ -432,7 +374,6 @@ class SingleDigitDisplay:
         if not self.debug and self._handle is not None:
             lgpio.gpiochip_close(self._handle)
  
-    # ---------- Intern ----------
  
     def _blink_loop(self, interval: float):
         while self._blinking:
