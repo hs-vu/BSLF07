@@ -25,7 +25,7 @@ WRONG_GUESS_HOLD_TIME = 3         # Blinken + Wordle-Feedback bei Falscheingabe
 CORRECT_GUESS_BLINK_TIME = 1.5    # Feier-Blinken bei richtigem Code
 CORRECT_CODE_DISPLAY_HOLD = 2     # richtiger Code bleibt danach ruhig stehen
 SOLUTION_DISPLAY_TIME = 3         # Lösung anzeigen, wenn alle Versuche aufgebraucht sind
-FEEDBACK_TIMEOUT = 30             # Sekunden, bis ohne Bewertung automatisch Idle startet
+IDLE_TIMEOUT = 30                 # Sekunden ohne Tastendruck, bis Idle startet
 FEEDBACK_SHOW_TIME = 1.5          # gewählte Bewertung kurz anzeigen
 
 # ---------------- Zustände ----------------
@@ -42,9 +42,11 @@ guessed_code: list[int] = [0, 0, 0, 0]
 code_index: int = 0
 tries: int = 4
 
+last_input_time: float = time.monotonic()
+
 idle_stop_event = threading.Event()
 idle_thread: threading.Thread | None = None
-feedback_timer: threading.Timer | None = None
+shutdown_event = threading.Event()
 
 
 def set_state(new_state):
@@ -112,7 +114,7 @@ def run_startup_tests():
 
 def start_new_round():
     global code, guessed_code, code_index, tries
-    code = [random.randint(0, 9) for _ in range(4)]
+    code = random.sample(range(10), 4)   # jede Ziffer nur einmal
     mqtt.report_answer(code)
     guessed_code = [0, 0, 0, 0]
     code_index = 0
@@ -121,6 +123,7 @@ def start_new_round():
     show_on_screen(guessed_code)
     singlescreen.set_digit(tries)
     print(f"Neuer Code generiert: {code}")
+    reset_inactivity()
     set_state(STATE_PLAYING)
 
 
@@ -172,7 +175,7 @@ def handle_guess_digit(x):
         print(f"Keine Versuche mehr. Lösung war {code}")
         show_on_screen(code)
         time.sleep(SOLUTION_DISPLAY_TIME)
-        enter_idle()
+        start_new_round()
         return
 
     show_on_screen(guessed_code)
@@ -184,25 +187,17 @@ def handle_guess_digit(x):
 def enter_feedback():
     """Nach richtigem Code: Bewertung 1-5 per Numpad abfragen.
     Anzeige: '1  5' als Hinweis auf den Bereich, Einzelziffer blinkt."""
-    global feedback_timer
-
     show_on_screen([1, None, None, 5])
     singlescreen.set_digit(None)
     singlescreen.set_dot(True)
     singlescreen.blink(0.4)
 
-    feedback_timer = threading.Timer(FEEDBACK_TIMEOUT, on_feedback_timeout)
-    feedback_timer.daemon = True
-    feedback_timer.start()
-
     print("Bitte Feedback 1-5 eingeben")
+    reset_inactivity()
     set_state(STATE_FEEDBACK)
 
 
 def handle_feedback(rating: int):
-    if feedback_timer:
-        feedback_timer.cancel()
-
     singlescreen.end_blink()
     singlescreen.set_dot(False)
     singlescreen.set_digit(rating)
@@ -214,13 +209,26 @@ def handle_feedback(rating: int):
     enter_idle()
 
 
-def on_feedback_timeout():
-    if not try_transition(STATE_FEEDBACK, STATE_BUSY):
-        return
-    print("Kein Feedback eingegeben - gehe in Idle-Modus")
-    singlescreen.end_blink()
-    singlescreen.set_dot(False)
-    enter_idle()
+# ---------------- Inaktivität ----------------
+
+def reset_inactivity():
+    global last_input_time
+    last_input_time = time.monotonic()
+
+
+def inactivity_watchdog():
+    """Geht in den Idle-Modus, wenn beim Spielen oder bei der Bewertung
+    IDLE_TIMEOUT Sekunden lang keine Taste gedrückt wurde."""
+    while not shutdown_event.wait(timeout=0.5):
+        with state_lock:
+            current = state
+        if current not in (STATE_PLAYING, STATE_FEEDBACK):
+            continue
+        if time.monotonic() - last_input_time < IDLE_TIMEOUT:
+            continue
+        if try_transition(current, STATE_BUSY):
+            print(f"{IDLE_TIMEOUT}s keine Eingabe - gehe in Idle-Modus")
+            enter_idle()
 
 
 # ---------------- Idle-Modus ----------------
@@ -297,6 +305,7 @@ def wake_up():
 # ---------------- Numpad-Eingang ----------------
 
 def wildcard(x):
+    reset_inactivity()
     with state_lock:
         current = state
 
@@ -317,6 +326,7 @@ def wildcard(x):
 
 
 pad.registerWildcard(wildcard)
+threading.Thread(target=inactivity_watchdog, daemon=True).start()
 
 # ---------------- Start ----------------
 run_startup_tests()
@@ -328,9 +338,8 @@ try:
 except KeyboardInterrupt:
     print("Beende Programm...")
 finally:
+    shutdown_event.set()
     stop_idle()
-    if feedback_timer:
-        feedback_timer.cancel()
     pad.stop()
     screen.close()
     singlescreen.close()
