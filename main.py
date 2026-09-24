@@ -49,11 +49,25 @@ idle_thread: threading.Thread | None = None
 shutdown_event = threading.Event()
 
 
+reported_status: str | None = None
+
+
+def report_status(new_state):
+    """Per MQTT gibt es nur zwei Zustände: 'idle', solange der Idle-Loop
+    läuft, sonst 'busy' (jemand ist an der Station). Gesendet wird nur,
+    wenn sich der gemeldete Zustand ändert."""
+    global reported_status
+    status = "idle" if new_state == STATE_IDLE else "busy"
+    if status != reported_status:
+        reported_status = status
+        mqtt.report_status(status)
+
+
 def set_state(new_state):
     global state
     with state_lock:
         state = new_state
-    mqtt.report_status(new_state)
+        report_status(new_state)
 
 
 def try_transition(expected, new_state) -> bool:
@@ -65,7 +79,7 @@ def try_transition(expected, new_state) -> bool:
         if state != expected:
             return False
         state = new_state
-    mqtt.report_status(new_state)
+        report_status(new_state)
     return True
 
 
