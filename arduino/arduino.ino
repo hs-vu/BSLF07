@@ -17,7 +17,5 @@ void loop() {
       bool on = bitRead(data, 7 - i);
       digitalWrite(ledPins[i], on ? HIGH : LOW);
     }
-    // Kein Serial.print hier: der Pi liest die Antworten nicht, der
-    // Sendepuffer läuft voll und blockiert dann den Arduino.
   }
 }
