@@ -7,7 +7,7 @@ class MqttReporter:
     erreichbar, wird MQTT einfach deaktiviert und alle report_*-Aufrufe
     tun nichts - das Spiel läuft trotzdem weiter."""
 
-    def __init__(self, broker_host="localhost", broker_port=1883, base_topic="Station/3"):
+    def __init__(self, broker_host="localhost", broker_port=1883, base_topic="station/3"):
         self.base_topic = base_topic
         self.enabled = False
         self.client = None
